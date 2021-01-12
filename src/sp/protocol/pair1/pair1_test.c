@@ -1,5 +1,5 @@
 //
-// Copyright 2020 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2017 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -144,6 +144,21 @@ test_mono_back_pressure(void)
 }
 
 void
+test_send_no_peer(void)
+{
+	nng_socket   s1;
+	nng_msg *    msg;
+	nng_duration to = 100;
+
+	NUTS_PASS(nng_pair1_open(&s1));
+	NUTS_PASS(nng_setopt_ms(s1, NNG_OPT_SENDTIMEO, to));
+
+	NUTS_PASS(nng_msg_alloc(&msg, 0));
+	NUTS_FAIL(nng_sendmsg(s1, msg, 0), NNG_ETIMEDOUT);
+	NUTS_CLOSE(s1);
+}
+
+void
 test_mono_raw_exchange(void)
 {
 	nng_socket s1;
@@ -210,8 +225,7 @@ test_mono_raw_header(void)
 
 	// Missing bits in the header
 	NUTS_PASS(nng_msg_alloc(&msg, 0));
-	NUTS_PASS(nng_sendmsg(c1, msg, 0));
-	NUTS_FAIL(nng_recvmsg(s1, &msg, 0), NNG_ETIMEDOUT);
+	NUTS_FAIL(nng_sendmsg(c1, msg, 0), NNG_EPROTO);
 
 	// Valid header works
 	NUTS_PASS(nng_msg_alloc(&msg, 0));
@@ -226,14 +240,12 @@ test_mono_raw_header(void)
 	// Header with reserved bits set dropped
 	NUTS_PASS(nng_msg_alloc(&msg, 0));
 	NUTS_PASS(nng_msg_header_append_u32(msg, 0xDEAD0000));
-	NUTS_PASS(nng_sendmsg(c1, msg, 0));
-	NUTS_FAIL(nng_recvmsg(s1, &msg, 0), NNG_ETIMEDOUT);
+	NUTS_FAIL(nng_sendmsg(c1, msg, 0), NNG_EPROTO);
 
 	// Header with no chance to add another hop gets dropped
 	NUTS_PASS(nng_msg_alloc(&msg, 0));
 	NUTS_PASS(nng_msg_header_append_u32(msg, 0xff));
-	NUTS_PASS(nng_sendmsg(c1, msg, 0));
-	NUTS_FAIL(nng_recvmsg(s1, &msg, 0), NNG_ETIMEDOUT);
+	NUTS_FAIL(nng_sendmsg(c1, msg, 0), NNG_EPROTO);
 
 	// With the same bits clear it works
 	NUTS_PASS(nng_msg_alloc(&msg, 0));
@@ -408,11 +420,70 @@ test_pair1_recv_garbage(void)
 
 	// ridiculous hop count
 	NUTS_PASS(nng_msg_alloc(&m, 0));
-	NUTS_PASS(nng_msg_append_u32(m, 0x1000));
+	NUTS_PASS(nng_msg_header_append_u32(m, 0x1000));
 	NUTS_PASS(nng_sendmsg(c, m, 0));
 	NUTS_FAIL(nng_recvmsg(s, &m, 0), NNG_ETIMEDOUT);
 
 	NUTS_CLOSE(c);
+	NUTS_CLOSE(s);
+}
+
+static void
+test_pair1_no_context(void)
+{
+	nng_socket s;
+	nng_ctx    ctx;
+
+	NUTS_PASS(nng_pair1_open(&s));
+	NUTS_FAIL(nng_ctx_open(&ctx, s), NNG_ENOTSUP);
+	NUTS_CLOSE(s);
+}
+
+static void
+test_pair1_send_buffer(void)
+{
+	nng_socket s;
+	int        v;
+	bool       b;
+	size_t     sz;
+
+	NUTS_PASS(nng_pair1_open(&s));
+	NUTS_PASS(nng_getopt_int(s, NNG_OPT_SENDBUF, &v));
+	NUTS_TRUE(v == 0);
+	NUTS_FAIL(nng_getopt_bool(s, NNG_OPT_SENDBUF, &b), NNG_EBADTYPE);
+	sz = 1;
+	NUTS_FAIL(nng_getopt(s, NNG_OPT_SENDBUF, &b, &sz), NNG_EINVAL);
+	NUTS_FAIL(nng_setopt_int(s, NNG_OPT_SENDBUF, -1), NNG_EINVAL);
+	NUTS_FAIL(nng_setopt_int(s, NNG_OPT_SENDBUF, 100000), NNG_EINVAL);
+	NUTS_FAIL(nng_setopt_bool(s, NNG_OPT_SENDBUF, false), NNG_EBADTYPE);
+	NUTS_FAIL(nng_setopt(s, NNG_OPT_SENDBUF, &b, 1), NNG_EINVAL);
+	NUTS_PASS(nng_setopt_int(s, NNG_OPT_SENDBUF, 100));
+	NUTS_PASS(nng_getopt_int(s, NNG_OPT_SENDBUF, &v));
+	NUTS_TRUE(v == 100);
+	NUTS_CLOSE(s);
+}
+
+static void
+test_pair1_recv_buffer(void)
+{
+	nng_socket s;
+	int        v;
+	bool       b;
+	size_t     sz;
+
+	NUTS_PASS(nng_pair1_open(&s));
+	NUTS_PASS(nng_getopt_int(s, NNG_OPT_RECVBUF, &v));
+	NUTS_TRUE(v == 0);
+	NUTS_FAIL(nng_getopt_bool(s, NNG_OPT_RECVBUF, &b), NNG_EBADTYPE);
+	sz = 1;
+	NUTS_FAIL(nng_getopt(s, NNG_OPT_RECVBUF, &b, &sz), NNG_EINVAL);
+	NUTS_FAIL(nng_setopt_int(s, NNG_OPT_RECVBUF, -1), NNG_EINVAL);
+	NUTS_FAIL(nng_setopt_int(s, NNG_OPT_RECVBUF, 100000), NNG_EINVAL);
+	NUTS_FAIL(nng_setopt_bool(s, NNG_OPT_RECVBUF, false), NNG_EBADTYPE);
+	NUTS_FAIL(nng_setopt(s, NNG_OPT_RECVBUF, &b, 1), NNG_EINVAL);
+	NUTS_PASS(nng_setopt_int(s, NNG_OPT_RECVBUF, 100));
+	NUTS_PASS(nng_getopt_int(s, NNG_OPT_RECVBUF, &v));
+	NUTS_TRUE(v == 100);
 	NUTS_CLOSE(s);
 }
 
@@ -421,6 +492,7 @@ NUTS_TESTS = {
 	{ "pair1 mono cooked", test_mono_cooked },
 	{ "pair1 mono faithful", test_mono_faithful },
 	{ "pair1 mono back pressure", test_mono_back_pressure },
+	{ "pair1 send no peer", test_send_no_peer },
 	{ "pair1 mono raw exchange", test_mono_raw_exchange },
 	{ "pair1 mono raw header", test_mono_raw_header },
 	{ "pair1 raw", test_pair1_raw },
@@ -428,6 +500,9 @@ NUTS_TESTS = {
 	{ "pair1 validate peer", test_pair1_validate_peer },
 	{ "pair1 recv no header", test_pair1_recv_no_header },
 	{ "pair1 recv garbage", test_pair1_recv_garbage },
+	{ "pair1 no context", test_pair1_no_context },
+	{ "pair1 send buffer", test_pair1_send_buffer },
+	{ "pair1 recv buffer", test_pair1_recv_buffer },
 
 	{ NULL, NULL },
 };
