@@ -441,11 +441,16 @@ pair1_sock_close(void *arg)
 {
 	pair1_sock *s = arg;
 	nni_aio *   a;
+	nni_msg *   m;
 	nni_mtx_lock(&s->mtx);
 	while (((a = nni_list_first(&s->raq)) != NULL) ||
 	    ((a = nni_list_first(&s->waq)) != NULL)) {
 		nni_aio_list_remove(a);
 		nni_aio_finish_error(a, NNG_ECLOSED);
+	}
+	while ((nni_lmq_getq(&s->rmq, &m) == 0) ||
+	    (nni_lmq_getq(&s->wmq, &m) == 0)) {
+		nni_msg_free(m);
 	}
 	nni_mtx_unlock(&s->mtx);
 }
@@ -709,7 +714,6 @@ pair1_get_recv_buf_len(void *arg, void *buf, size_t *szp, nni_opt_type t)
 
 	return (nni_copyout_int(val, buf, szp, t));
 }
-
 
 static int
 pair1_sock_get_recv_fd(void *arg, void *buf, size_t *szp, nni_opt_type t)
