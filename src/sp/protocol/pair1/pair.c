@@ -375,6 +375,7 @@ pair1_send_sched(pair1_sock *s)
 	nni_mtx_lock(&s->mtx);
 
 	if ((p = s->p) == NULL) {
+		nni_mtx_unlock(&s->mtx);
 		return;
 	}
 
