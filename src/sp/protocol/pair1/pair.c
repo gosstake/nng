@@ -203,8 +203,12 @@ pair1_pipe_stop(void *arg)
 
 	nni_mtx_lock(&s->mtx);
 	if (s->p == p) {
-		s->p        = NULL;
-		s->rd_ready = false;
+		s->p = NULL;
+		if (s->rd_ready) {
+			nni_msg *m = nni_aio_get_msg(&p->aio_recv);
+			nni_msg_free(m);
+			s->rd_ready = false;
+		}
 		if (s->wr_ready) {
 			s->wr_ready = false;
 			nni_pollable_clear(&s->writable);
