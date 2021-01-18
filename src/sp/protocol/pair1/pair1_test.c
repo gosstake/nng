@@ -155,6 +155,7 @@ test_send_no_peer(void)
 
 	NUTS_PASS(nng_msg_alloc(&msg, 0));
 	NUTS_FAIL(nng_sendmsg(s1, msg, 0), NNG_ETIMEDOUT);
+	nng_msg_free(msg);
 	NUTS_CLOSE(s1);
 }
 
